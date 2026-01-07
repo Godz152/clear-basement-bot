@@ -5,7 +5,7 @@ import 'dotenv/config'; // Make sure you have a .env file with BOT_TOKEN and GUI
 
 const BOT_TOKEN = process.env.BOT_TOKEN;
 const GUILD_ID = process.env.GUILD_ID; // your Discord server ID
-const COMMAND_ROLE = 'Ticket Manager'; // Role required to run the command
+const COMMAND_ROLE = 'Staff'; // Role required to run the command
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages] });
 
@@ -63,3 +63,39 @@ client.on('interactionCreate', async (interaction) => {
     // Check role
     if (!interaction.member.roles.cache.some(r => r.name === COMMAND_ROLE)) {
       return interaction.reply({ content: '❌ You do not have permission to run this.', ephemeral: true });
+    }
+
+    const type = interaction.options.getString('type');
+
+    // Map input to category IDs
+    const categoryMap = {
+      general_support: '1458224100131737804', // replace with Closed Tickets category ID
+      appeal_report: '1458224717168377956',   // replace with Closed Appeal / Report Tickets category ID
+      management: '1458224472862621788',      // replace with Closed Management & Directors Tickets category ID
+    };
+
+    const categoryId = categoryMap[type];
+    if (!categoryId) return interaction.reply({ content: '❌ Invalid category.', ephemeral: true });
+
+    const category = interaction.guild.channels.cache.get(categoryId);
+    if (!category) return interaction.reply({ content: '❌ Category not found.', ephemeral: true });
+
+    // Delete channels under category
+    const children = category.children; // Collection of channels under category
+    let deletedCount = 0;
+
+    for (const [id, channel] of children) {
+      try {
+        await channel.delete();
+        deletedCount++;
+      } catch (err) {
+        console.error(`Failed to delete channel ${channel.name}:`, err);
+      }
+    }
+
+    await interaction.reply({ content: `✅ Deleted ${deletedCount} channels from **${category.name}**.`, ephemeral: true });
+  }
+});
+
+// ---------- Login ----------
+client.login(BOT_TOKEN);
