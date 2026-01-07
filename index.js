@@ -1,30 +1,35 @@
-// index.js
-import { Client, GatewayIntentBits, REST, Routes, PermissionFlagsBits } from 'discord.js';
-import express from 'express';
-import 'dotenv/config'; // Make sure you have a .env file with BOT_TOKEN and GUILD_ID
+import { Client, GatewayIntentBits, Collection } from 'discord.js';
+import 'dotenv/config'; // make sure your BOT_TOKEN is in .env
 
-const BOT_TOKEN = process.env.BOT_TOKEN;
-const GUILD_ID = process.env.GUILD_ID; // your Discord server ID
-const COMMAND_ROLE = 'Staff'; // Role required to run the command
+// ======= CONFIG =======
+const TOKEN = process.env.BOT_TOKEN; // Your bot token here
+const PREFIX = '/'; // Not strictly needed for slash commands
+const ALLOWED_ROLE = 'Staff'; // Change to your role name allowed to run /clearbasement
+// =====================
 
-const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages] });
+const client = new Client({
+  intents: [
+    GatewayIntentBits.Guilds,
+    GatewayIntentBits.GuildMessages,
+    GatewayIntentBits.MessageContent,
+  ],
+});
 
-// ---------- Express server to satisfy Render ----------
-const app = express();
-const PORT = process.env.PORT || 3000;
-app.get('/', (req, res) => res.send('Bot is running!'));
-app.listen(PORT, () => console.log(`Listening on port ${PORT}`));
+client.commands = new Collection();
 
-// ---------- Slash Command Setup ----------
+// ======== REGISTER COMMAND =========
+import { REST } from '@discordjs/rest';
+import { Routes } from 'discord-api-types/v10';
+
 const commands = [
   {
     name: 'clearbasement',
-    description: 'Delete all channels in a specific ticket category',
+    description: 'Deletes channels under a specific category',
     options: [
       {
-        name: 'type',
-        description: 'Which ticket category to clear',
+        name: 'category',
         type: 3, // STRING
+        description: 'Which ticket category to clear?',
         required: true,
         choices: [
           { name: 'General and Support Tickets', value: 'general_support' },
@@ -36,66 +41,85 @@ const commands = [
   },
 ];
 
-// Register commands to your guild
-const rest = new REST({ version: '10' }).setToken(BOT_TOKEN);
+const rest = new REST({ version: '10' }).setToken(TOKEN);
 
 (async () => {
   try {
     console.log('Started refreshing application (/) commands.');
-    await rest.put(Routes.applicationGuildCommands(client.user?.id || '0', GUILD_ID), {
+    await rest.put(Routes.applicationCommands(process.env.CLIENT_ID), {
       body: commands,
     });
     console.log('Successfully reloaded application (/) commands.');
-  } catch (err) {
-    console.error(err);
+  } catch (error) {
+    console.error(error);
   }
 })();
+// ===================================
 
-// ---------- Bot Logic ----------
-client.once('clientReady', () => {
-  console.log(`Logged in as ${client.user.tag}`);
+// ======== BOT EVENTS =========
+client.on('clientReady', () => {
+  console.log(`Logged in as ${client.user.tag}!`);
 });
 
 client.on('interactionCreate', async (interaction) => {
   if (!interaction.isChatInputCommand()) return;
 
   if (interaction.commandName === 'clearbasement') {
+    const categoryOption = interaction.options.getString('category');
+
     // Check role
-    if (!interaction.member.roles.cache.some(r => r.name === COMMAND_ROLE)) {
-      return interaction.reply({ content: '❌ You do not have permission to run this.', ephemeral: true });
+    const member = interaction.member;
+    if (!member.roles.cache.some((r) => r.name === ALLOWED_ROLE)) {
+      return interaction.reply({
+        content: '❌ You do not have permission to run this command.',
+        ephemeral: true,
+      });
     }
 
-    const type = interaction.options.getString('type');
+    // Map the option to your category IDs
+    let categoryId;
+    if (categoryOption === 'general_support') categoryId = '1458224100131737804';
+    else if (categoryOption === 'appeal_report') categoryId = '1458224717168377956';
+    else if (categoryOption === 'management') categoryId = '1458224472862621788';
 
-    // Map input to category IDs
-    const categoryMap = {
-      general_support: '1458224100131737804', // replace with Closed Tickets category ID
-      appeal_report: '1458224717168377956',   // replace with Closed Appeal / Report Tickets category ID
-      management: '1458224472862621788',      // replace with Closed Management & Directors Tickets category ID
-    };
-
-    const categoryId = categoryMap[type];
-    if (!categoryId) return interaction.reply({ content: '❌ Invalid category.', ephemeral: true });
+    if (!categoryId) {
+      return interaction.reply({
+        content: '❌ Invalid category selected.',
+        ephemeral: true,
+      });
+    }
 
     const category = interaction.guild.channels.cache.get(categoryId);
-    if (!category) return interaction.reply({ content: '❌ Category not found.', ephemeral: true });
+    if (!category) {
+      return interaction.reply({
+        content: '❌ Category not found.',
+        ephemeral: true,
+      });
+    }
 
-    // Delete channels under category
-    const children = category.children; // Collection of channels under category
+    // Delete all channels under category
+    const channelsToDelete = category.children.cache;
     let deletedCount = 0;
-
-    for (const [id, channel] of children) {
+    for (const [, channel] of channelsToDelete) {
       try {
-        await channel.delete();
+        await channel.delete('Cleared by /clearbasement');
         deletedCount++;
       } catch (err) {
-        console.error(`Failed to delete channel ${channel.name}:`, err);
+        console.error(err);
       }
     }
 
-    await interaction.reply({ content: `✅ Deleted ${deletedCount} channels from **${category.name}**.`, ephemeral: true });
+    await interaction.reply({
+      content: `✅ Deleted ${deletedCount} channels under **${category.name}**.`,
+      ephemeral: true,
+    });
   }
 });
 
-// ---------- Login ----------
-client.login(BOT_TOKEN);
+// ======== KEEP ALIVE FOR RENDER =========
+setInterval(() => {
+  console.log('Bot alive check');
+}, 1000 * 60 * 5); // Logs every 5 minutes
+
+// ======== LOGIN =======
+client.login(TOKEN);
