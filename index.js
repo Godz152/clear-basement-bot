@@ -1,74 +1,65 @@
-require('dotenv').config();
-const {
-    Client,
-    GatewayIntentBits,
-    SlashCommandBuilder,
-    ChannelType
-} = require('discord.js');
+// index.js
+import { Client, GatewayIntentBits, REST, Routes, PermissionFlagsBits } from 'discord.js';
+import express from 'express';
+import 'dotenv/config'; // Make sure you have a .env file with BOT_TOKEN and GUILD_ID
 
-const client = new Client({
-    intents: [GatewayIntentBits.Guilds]
-});
+const BOT_TOKEN = process.env.BOT_TOKEN;
+const GUILD_ID = process.env.GUILD_ID; // your Discord server ID
+const COMMAND_ROLE = 'Ticket Manager'; // Role required to run the command
 
-const CATEGORY_MAP = {
-    general_support: 'Closed Tickets',
-    appeal_report: 'Closed Appeal / Report Tickets',
-    management: 'Closed Management & Directors Tickets'
-};
+const client = new Client({ intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages] });
 
-client.once('ready', async () => {
-    console.log(`🟢 Logged in as ${client.user.tag}`);
+// ---------- Express server to satisfy Render ----------
+const app = express();
+const PORT = process.env.PORT || 3000;
+app.get('/', (req, res) => res.send('Bot is running!'));
+app.listen(PORT, () => console.log(`Listening on port ${PORT}`));
 
-    const command = new SlashCommandBuilder()
-        .setName('clearbasement')
-        .setDescription('Deletes all channels under a closed ticket category')
-        .addStringOption(option =>
-            option.setName('type')
-                .setDescription('Select which basement to clear')
-                .setRequired(true)
-                .addChoices(
-                    { name: 'General and Support Tickets', value: 'general_support' },
-                    { name: 'Appeal and Report Tickets', value: 'appeal_report' },
-                    { name: 'Management Tickets', value: 'management' }
-                )
-        );
+// ---------- Slash Command Setup ----------
+const commands = [
+  {
+    name: 'clearbasement',
+    description: 'Delete all channels in a specific ticket category',
+    options: [
+      {
+        name: 'type',
+        description: 'Which ticket category to clear',
+        type: 3, // STRING
+        required: true,
+        choices: [
+          { name: 'General and Support Tickets', value: 'general_support' },
+          { name: 'Appeal and Report Tickets', value: 'appeal_report' },
+          { name: 'Management Tickets', value: 'management' },
+        ],
+      },
+    ],
+  },
+];
 
-    await client.guilds.cache
-        .get(process.env.GUILD_ID)
-        .commands.create(command);
-});
+// Register commands to your guild
+const rest = new REST({ version: '10' }).setToken(BOT_TOKEN);
 
-client.on('interactionCreate', async interaction => {
-    if (!interaction.isChatInputCommand()) return;
-    if (interaction.commandName !== 'clearbasement') return;
-
-    if (!interaction.member.roles.cache.has(process.env.REQUIRED_ROLE_ID)) {
-        return interaction.reply({ content: '❌ No permission.', ephemeral: true });
-    }
-
-    const choice = interaction.options.getString('type');
-    const categoryName = CATEGORY_MAP[choice];
-
-    const category = interaction.guild.channels.cache.find(
-        c => c.type === ChannelType.GuildCategory && c.name === categoryName
-    );
-
-    if (!category) {
-        return interaction.reply({ content: '❌ Category not found.', ephemeral: true });
-    }
-
-    const channels = interaction.guild.channels.cache.filter(
-        ch => ch.parentId === category.id
-    );
-
-    for (const ch of channels.values()) {
-        await ch.delete().catch(console.error);
-    }
-
-    await interaction.reply({
-        content: `✅ Deleted ${channels.size} channels from **${category.name}**.`,
-        ephemeral: true
+(async () => {
+  try {
+    console.log('Started refreshing application (/) commands.');
+    await rest.put(Routes.applicationGuildCommands(client.user?.id || '0', GUILD_ID), {
+      body: commands,
     });
+    console.log('Successfully reloaded application (/) commands.');
+  } catch (err) {
+    console.error(err);
+  }
+})();
+
+// ---------- Bot Logic ----------
+client.once('clientReady', () => {
+  console.log(`Logged in as ${client.user.tag}`);
 });
 
-client.login(process.env.BOT_TOKEN);
+client.on('interactionCreate', async (interaction) => {
+  if (!interaction.isChatInputCommand()) return;
+
+  if (interaction.commandName === 'clearbasement') {
+    // Check role
+    if (!interaction.member.roles.cache.some(r => r.name === COMMAND_ROLE)) {
+      return interaction.reply({ content: '❌ You do not have permission to run this.', ephemeral: true });
